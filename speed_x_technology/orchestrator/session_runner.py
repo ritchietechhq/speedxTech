@@ -174,6 +174,11 @@ def main() -> int:
     state_manager.init_item("execution_providers",      ["cuda", "cpu"])
     state_manager.init_item("video_memory_strategy",    "strict")
 
+    # Group 2b — Model download
+    # Read by facefusion.download.resolve_download_url() when a model is first
+    # needed.  Mirrors facefusion.choices.download_providers (program.py default).
+    state_manager.init_item("download_providers",       ["github", "huggingface"])
+
     # Group 3 — Face detector
     state_manager.init_item("face_detector_model",      "yolo_face")
     state_manager.init_item("face_detector_size",       "640x640")
