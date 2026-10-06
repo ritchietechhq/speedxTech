@@ -289,6 +289,30 @@ def main() -> int:
         # Non-fatal: log but continue — the real failure will surface at model load.
         print(f"[SPEED_X_TECHNOLOGY-EP] EP pre-check warning: {_ep_exc}", flush=True)
 
+    # ── Download / verify models ──────────────────────────────────────────────
+    # facefusion normally does this via core.pre_check(); the streaming path
+    # skips it, leaving inference pools empty (None) on a fresh machine.
+    # Each processor's pre_check() also pulls the shared modules (content
+    # analyser, face detector/landmarker/masker/classifier/recognizer).
+    try:
+        from facefusion.processors.core import get_processors_modules
+        for _proc_module in get_processors_modules(state_manager.get_item("processors")):
+            print(f"[Runner] Checking/downloading models: {_proc_module.__name__}", flush=True)
+            if not _proc_module.pre_check():
+                raise RuntimeError(f"pre_check() returned False for {_proc_module.__name__}")
+    except Exception as exc:
+        detail = f"Model download/verification failed: {exc}"
+        _write_status(args.status_file, {
+            "session_id":     args.session_id,
+            "status":         "failed_startup",
+            "fps":            None,
+            "frames_total":   0,
+            "failure_detail": detail,
+            "updated_at":     _now_iso(),
+        })
+        print(f"[Runner] {detail}", file=sys.stderr)
+        return EXIT_STARTUP_FAILURE
+
     # ── Open camera ───────────────────────────────────────────────────────────
     cam_index = int(args.camera_index) if str(args.camera_index).lstrip("-").isdigit() else args.camera_index
     camera = cv2.VideoCapture(cam_index)
