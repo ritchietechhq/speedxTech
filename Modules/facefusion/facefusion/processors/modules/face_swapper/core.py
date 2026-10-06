@@ -26,7 +26,7 @@ from facefusion.processors.types import ProcessorOutputs
 from facefusion.program_helper import find_argument_group
 from facefusion.thread_helper import conditional_thread_semaphore
 from facefusion.types import ApplyStateItem, Args, DownloadScope, Embedding, Face, InferencePool, InferenceProvider, ModelOptions, ModelSet, ProcessMode, VisionFrame
-from facefusion.vision import read_static_image, read_static_images, read_static_video_frame, unpack_resolution
+from facefusion.vision import conditional_match_frame_color, read_static_image, read_static_images, read_static_video_frame, unpack_resolution
 
 
 @lru_cache()
@@ -634,6 +634,7 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 	pixel_boost_size = unpack_resolution(state_manager.get_item('face_swapper_pixel_boost'))
 	pixel_boost_total = pixel_boost_size[0] // model_size[0]
 	crop_vision_frame, affine_matrix = warp_face_by_face_landmark_5(temp_vision_frame, target_face.landmark_set.get('5/68'), model_template, pixel_boost_size)
+	crop_vision_frame_raw = crop_vision_frame.copy()
 	temp_vision_frames = []
 	crop_masks = []
 
@@ -652,6 +653,7 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 		pixel_boost_vision_frame = normalize_crop_frame(pixel_boost_vision_frame)
 		temp_vision_frames.append(pixel_boost_vision_frame)
 	crop_vision_frame = explode_pixel_boost(temp_vision_frames, pixel_boost_total, model_size, pixel_boost_size)
+	crop_vision_frame = conditional_match_frame_color(crop_vision_frame_raw, crop_vision_frame)
 
 	if 'area' in state_manager.get_item('face_mask_types'):
 		face_landmark_68 = cv2.transform(target_face.landmark_set.get('68').reshape(1, -1, 2), affine_matrix).reshape(-1, 2)

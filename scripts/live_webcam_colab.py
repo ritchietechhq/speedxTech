@@ -122,7 +122,7 @@ def _init_state(state_manager, identity_id: str) -> None:
         "face_selector_race": None,
         "reference_face_position": 0,
         "reference_face_distance": 0.3,
-        "face_mask_types": ["box"],
+        "face_mask_types": ["box", "occlusion"],
         "face_mask_blur": 0.3,
         "face_mask_padding": [0, 0, 0, 0],
         "face_mask_areas": [

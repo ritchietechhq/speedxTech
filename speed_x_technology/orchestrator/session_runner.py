@@ -122,8 +122,10 @@ def main() -> int:
         "updated_at":   _now_iso(),
     })
 
+
     # ── Facefusion path setup ─────────────────────────────────────────────────
-    ff_root = os.path.abspath(args.ff_root)
+    ff_r
+    oot = os.path.abspath(args.ff_root)
     speed_x_technology_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     for p in [ff_root, speed_x_technology_root]:
         if p not in sys.path:
@@ -191,7 +193,7 @@ def main() -> int:
     state_manager.init_item("face_landmarker_score",    0.5)
 
     # Group 5 — Face selector
-    state_manager.init_item("face_selector_mode",       "one")
+    state_manager.init_item("face_selector_mode",       "reference")
     state_manager.init_item("face_selector_order",      "large-small")
     state_manager.init_item("face_selector_age_start",  None)   # no age filter
     state_manager.init_item("face_selector_age_end",    None)   # no age filter
@@ -201,7 +203,7 @@ def main() -> int:
     state_manager.init_item("reference_face_distance",  0.3)
 
     # Group 6 — Face masker
-    state_manager.init_item("face_mask_types",          ["box"])
+    state_manager.init_item("face_mask_types",          ["box", "occlusion"])
     state_manager.init_item("face_mask_blur",           0.3)
     state_manager.init_item("face_mask_padding",        [0, 0, 0, 0])
     # face_mask_areas / face_mask_regions: pass all available so nothing is
@@ -222,7 +224,7 @@ def main() -> int:
 
     # Group 7 — Face swapper processor
     state_manager.init_item("face_swapper_model",       "hyperswap_1a_256")
-    state_manager.init_item("face_swapper_pixel_boost", "256x256")
+    state_manager.init_item("face_swapper_pixel_boost", "128x128")
     state_manager.init_item("face_swapper_weight",      0.5)
 
     # Group 8 — Face tracker
@@ -288,30 +290,6 @@ def main() -> int:
     except Exception as _ep_exc:
         # Non-fatal: log but continue — the real failure will surface at model load.
         print(f"[SPEED_X_TECHNOLOGY-EP] EP pre-check warning: {_ep_exc}", flush=True)
-
-    # ── Download / verify models ──────────────────────────────────────────────
-    # facefusion normally does this via core.pre_check(); the streaming path
-    # skips it, leaving inference pools empty (None) on a fresh machine.
-    # Each processor's pre_check() also pulls the shared modules (content
-    # analyser, face detector/landmarker/masker/classifier/recognizer).
-    try:
-        from facefusion.processors.core import get_processors_modules
-        for _proc_module in get_processors_modules(state_manager.get_item("processors")):
-            print(f"[Runner] Checking/downloading models: {_proc_module.__name__}", flush=True)
-            if not _proc_module.pre_check():
-                raise RuntimeError(f"pre_check() returned False for {_proc_module.__name__}")
-    except Exception as exc:
-        detail = f"Model download/verification failed: {exc}"
-        _write_status(args.status_file, {
-            "session_id":     args.session_id,
-            "status":         "failed_startup",
-            "fps":            None,
-            "frames_total":   0,
-            "failure_detail": detail,
-            "updated_at":     _now_iso(),
-        })
-        print(f"[Runner] {detail}", file=sys.stderr)
-        return EXIT_STARTUP_FAILURE
 
     # ── Open camera ───────────────────────────────────────────────────────────
     cam_index = int(args.camera_index) if str(args.camera_index).lstrip("-").isdigit() else args.camera_index
