@@ -76,6 +76,8 @@ _CAMERA_INDEX: Union[int, str] = (
     int(_CAMERA_INDEX_RAW) if _CAMERA_INDEX_RAW.lstrip("-").isdigit() else _CAMERA_INDEX_RAW
 )
 _RUNNER_SCRIPT = str(Path(__file__).resolve().parent / "session_runner.py")
+# Seconds to wait after SIGTERM before escalating to SIGKILL.
+_STOP_GRACE_SECONDS = 2.0
 
 os.makedirs(_SESSION_DIR, exist_ok=True)
 
@@ -256,12 +258,18 @@ async def start_session(body: StartSessionRequest) -> StartSessionResponse:
         env["SPEED_X_TECHNOLOGY_CONSENT_DB_PATH"] = _DB_PATH
 
     try:
+        # Runner stdout/stderr go to a per-session log file (not PIPEs: nothing
+        # reads the pipes, so a chatty runner could block once the buffer fills,
+        # and the [SPEED_X_TECHNOLOGY-EP-LIVE] CUDA lines would never be visible).
+        log_path = os.path.join(_SESSION_DIR, f"{session_id}.log")
+        log_file = open(log_path, "ab")
         proc = subprocess.Popen(
             cmd,
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
         )
+        log_file.close()  # child holds its own duplicated descriptor
     except Exception as exc:
         store_update(
             session_id,
@@ -368,6 +376,22 @@ async def stop_session(session_id: str) -> None:
         proc.send_signal(signal.SIGTERM)
     except ProcessLookupError:
         pass  # already exited between the lock release and send_signal
+        return
+
+    # The runner only notices SIGTERM between frames; if it is blocked
+    # (model call, ffmpeg pipe, etc.) escalate to SIGKILL after a grace period.
+    def _escalate() -> None:
+        try:
+            proc.wait(timeout=_STOP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+    threading.Thread(
+        target=_escalate, daemon=True, name=f"stop-{session_id[:8]}"
+    ).start()
 
 
 @app.get(
