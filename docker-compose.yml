@@ -1,0 +1,152 @@
+# ============================================================
+# SPEED_X_TECHNOLOGY — docker-compose.yml
+# Wires Container A (facefusion) and Container B (voice-changer)
+# together with shared volumes and the IPC channel.
+#
+# Usage:
+#   docker compose up                          # start both, GPU 0
+#   SPEED_X_TECHNOLOGY_GPU_DEVICE_ID=1 docker compose up     # use GPU 1 (future multi-GPU)
+#   docker compose up facefusion               # start only container A
+#
+# GPU device selection:
+#   Set SPEED_X_TECHNOLOGY_GPU_DEVICE_ID to the integer device index (default: 0).
+#   Both containers are pinned to the same physical GPU so the combined
+#   VRAM budget is enforced on a single device.  To split across two GPUs
+#   in a future multi-GPU setup, override the device_ids per-service.
+#
+# Prerequisites on host:
+#   - NVIDIA driver ≥ 525 (CUDA 12.x capable)
+#   - NVIDIA Container Toolkit installed (nvidia-ctk)
+#   - 'nvidia' runtime set as Docker default, OR use the
+#     'deploy: resources' block below (Compose v3 style)
+# ============================================================
+
+version: "3.9"
+
+# ── Named volumes ─────────────────────────────────────────────
+volumes:
+  # Shared model weights: both containers can read from here.
+  # In practice only facefusion reads face models; voice-changer
+  # reads voice models.  Keeping them in one volume simplifies
+  # host-side management.
+  speed_x_technology_models:
+    driver: local
+
+  # SQLite consent DB — written and read only by facefusion /
+  # the consent gate.  Voice-changer never touches it.
+  speed_x_technology_data:
+    driver: local
+
+  # IPC socket directory — the Unix domain socket file that
+  # facefusion (producer) and voice-changer (consumer) use for
+  # audio timing/sync messages lives here.
+  speed_x_technology_ipc:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────
+networks:
+  speed_x_technology_internal:
+    driver: bridge
+
+# ── Services ──────────────────────────────────────────────────
+services:
+
+  # ── Container A: facefusion ──────────────────────────────────
+  facefusion:
+    build:
+      context: .                              # SPEED_X_TECHNOLOGY project root
+      dockerfile: docker/facefusion/Dockerfile
+    image: speed_x_technology-facefusion:latest
+    container_name: speed_x_technology-facefusion
+
+    # GPU access — pinned to SPEED_X_TECHNOLOGY_GPU_DEVICE_ID (default: "0").
+    # Change the env var to target a different physical device.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${SPEED_X_TECHNOLOGY_GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+
+    # Ports
+    ports:
+      # UDP stream output (OBS / downstream consumer)
+      - "27000:27000/udp"
+
+    # Volumes
+    volumes:
+      - speed_x_technology_models:/app/models
+      - speed_x_technology_data:/app/data
+      # IPC socket directory — mounted at the same path in both containers
+      - speed_x_technology_ipc:/ipc
+      # Live-mount speed_x_technology/ package for development iteration
+      - ./speed_x_technology:/app/speed_x_technology:ro
+
+    environment:
+      # ONNX Runtime execution provider — GPU
+      - FACEFUSION_EXECUTION_PROVIDERS=cuda
+      # VRAM budget ceiling for facefusion (soft limit via orchestrator)
+      - FACEFUSION_VRAM_LIMIT_GB=5
+      # Path to consent SQLite DB
+      - SPEED_X_TECHNOLOGY_CONSENT_DB_PATH=/app/data/consent.db
+      # IPC socket path (producer side)
+      - SPEED_X_TECHNOLOGY_IPC_SOCKET_PATH=/ipc/speed_x_technology_sync.sock
+
+    networks:
+      - speed_x_technology_internal
+
+    # Restart policy for production; disable during dev
+    restart: unless-stopped
+
+    # Allow the session orchestrator (Step 3) to call
+    # facefusion's Python API directly.
+    # The orchestrator runs as a separate process inside this
+    # container, so no extra port needed.
+    stdin_open: true
+    tty: true
+
+
+  # ── Container B: voice-changer ───────────────────────────────
+  voice-changer:
+    build:
+      context: .
+      dockerfile: docker/voice-changer/Dockerfile
+    image: speed_x_technology-voice-changer:latest
+    container_name: speed_x_technology-voice-changer
+
+    # GPU access — same physical device as facefusion (SPEED_X_TECHNOLOGY_GPU_DEVICE_ID).
+    # PyTorch VRAM is hard-capped inside the process via the shim.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${SPEED_X_TECHNOLOGY_GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+
+    ports:
+      # voice-changer WebSocket/HTTP control port
+      # (only needed for direct browser UI access; the
+      #  orchestrator connects via the internal network)
+      - "18888:18888"
+
+    volumes:
+      - speed_x_technology_models:/app/server/model_dir
+      - speed_x_technology_ipc:/ipc
+
+    environment:
+      # Cap PyTorch to 2.5 GB (0.31 × 8 GB).
+      # Tune this down further if facefusion OOMs; do not raise
+      # it above 0.37 without profiling both containers together.
+      - TORCH_VRAM_FRACTION=0.31
+      # IPC socket path (consumer side — same path as producer)
+      - SPEED_X_TECHNOLOGY_IPC_SOCKET_PATH=/ipc/speed_x_technology_sync.sock
+
+    depends_on:
+      - facefusion
+
+    networks:
+      - speed_x_technology_internal
+
+    restart: unless-stopped
