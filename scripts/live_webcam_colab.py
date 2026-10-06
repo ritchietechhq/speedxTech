@@ -114,7 +114,7 @@ def _init_state(state_manager, identity_id: str) -> None:
         "face_detector_angles": [0],
         "face_landmarker_model": "2dfan4",
         "face_landmarker_score": 0.5,
-        "face_selector_mode": "reference",
+        "face_selector_mode": "one",
         "face_selector_order": "large-small",
         "face_selector_age_start": None,
         "face_selector_age_end": None,

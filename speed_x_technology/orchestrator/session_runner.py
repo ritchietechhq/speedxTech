@@ -191,7 +191,7 @@ def main() -> int:
     state_manager.init_item("face_landmarker_score",    0.5)
 
     # Group 5 — Face selector
-    state_manager.init_item("face_selector_mode",       "reference")
+    state_manager.init_item("face_selector_mode",       "one")
     state_manager.init_item("face_selector_order",      "large-small")
     state_manager.init_item("face_selector_age_start",  None)   # no age filter
     state_manager.init_item("face_selector_age_end",    None)   # no age filter
