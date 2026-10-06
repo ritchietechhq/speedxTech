@@ -282,12 +282,24 @@ def blend_frame(source_vision_frame : VisionFrame, target_vision_frame : VisionF
 
 
 def conditional_match_frame_color(source_vision_frame : VisionFrame, target_vision_frame : VisionFrame) -> VisionFrame:
+	source_vision_frame = _ensure_uint8_vision_frame(source_vision_frame)
+	target_vision_frame = _ensure_uint8_vision_frame(target_vision_frame)
 	histogram_factor = calculate_histogram_difference(source_vision_frame, target_vision_frame)
 	target_vision_frame = blend_frame(target_vision_frame, match_frame_color(source_vision_frame, target_vision_frame), histogram_factor)
 	return target_vision_frame
 
 
+def _ensure_uint8_vision_frame(vision_frame : VisionFrame) -> VisionFrame:
+	if vision_frame.dtype != numpy.uint8:
+		if vision_frame.size > 0 and vision_frame.max() <= 1.0:
+			vision_frame = vision_frame * 255.0
+		vision_frame = numpy.clip(vision_frame, 0, 255).astype(numpy.uint8)
+	return vision_frame
+
+
 def match_frame_color(source_vision_frame : VisionFrame, target_vision_frame : VisionFrame) -> VisionFrame:
+	source_vision_frame = _ensure_uint8_vision_frame(source_vision_frame)
+	target_vision_frame = _ensure_uint8_vision_frame(target_vision_frame)
 	color_difference_sizes = numpy.linspace(16, target_vision_frame.shape[0], 3, endpoint = False)
 
 	for color_difference_size in color_difference_sizes:
@@ -297,17 +309,19 @@ def match_frame_color(source_vision_frame : VisionFrame, target_vision_frame : V
 
 
 def equalize_frame_color(source_vision_frame : VisionFrame, target_vision_frame : VisionFrame, size : Size) -> VisionFrame:
+	source_vision_frame = _ensure_uint8_vision_frame(source_vision_frame)
+	target_vision_frame = _ensure_uint8_vision_frame(target_vision_frame)
 	source_frame_resize = cv2.resize(source_vision_frame, size, interpolation = cv2.INTER_AREA).astype(numpy.float32)
 	target_frame_resize = cv2.resize(target_vision_frame, size, interpolation = cv2.INTER_AREA).astype(numpy.float32)
 	color_difference_vision_frame = numpy.subtract(source_frame_resize, target_frame_resize)
 	color_difference_vision_frame = cv2.resize(color_difference_vision_frame, target_vision_frame.shape[:2][::-1], interpolation = cv2.INTER_CUBIC)
-	target_vision_frame = numpy.add(target_vision_frame, color_difference_vision_frame).clip(0, 255).astype(numpy.uint8)
+	target_vision_frame = numpy.add(target_vision_frame.astype(numpy.float32), color_difference_vision_frame).clip(0, 255).astype(numpy.uint8)
 	return target_vision_frame
 
 
 def calculate_histogram_difference(source_vision_frame : VisionFrame, target_vision_frame : VisionFrame) -> float:
-	source_vision_frame = source_vision_frame.astype(numpy.uint8)
-	target_vision_frame = target_vision_frame.astype(numpy.uint8)
+	source_vision_frame = _ensure_uint8_vision_frame(source_vision_frame)
+	target_vision_frame = _ensure_uint8_vision_frame(target_vision_frame)
 	histogram_source = cv2.calcHist([cv2.cvtColor(source_vision_frame, cv2.COLOR_BGR2HSV)], [ 0, 1 ], None, [ 50, 60 ], [ 0, 180, 0, 256 ])
 	histogram_target = cv2.calcHist([cv2.cvtColor(target_vision_frame, cv2.COLOR_BGR2HSV)], [ 0, 1 ], None, [ 50, 60 ], [ 0, 180, 0, 256 ])
 	histogram_difference = float(numpy.interp(cv2.compareHist(histogram_source, histogram_target, cv2.HISTCMP_CORREL), [ -1, 1 ], [ 0, 1 ]))
