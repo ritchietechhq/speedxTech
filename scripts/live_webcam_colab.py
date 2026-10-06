@@ -138,7 +138,7 @@ def _init_state(state_manager, identity_id: str) -> None:
         "face_occluder_model": "xseg_1",
         "face_parser_model": "bisenet_resnet_34",
         "face_swapper_model": "hyperswap_1a_256",
-        "face_swapper_pixel_boost": "128x128",
+        "face_swapper_pixel_boost": "256x256",
         "face_swapper_weight": 0.5,
         "face_tracker_score": 0.0,
     }

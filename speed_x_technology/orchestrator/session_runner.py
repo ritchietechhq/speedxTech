@@ -222,7 +222,7 @@ def main() -> int:
 
     # Group 7 — Face swapper processor
     state_manager.init_item("face_swapper_model",       "hyperswap_1a_256")
-    state_manager.init_item("face_swapper_pixel_boost", "128x128")
+    state_manager.init_item("face_swapper_pixel_boost", "256x256")
     state_manager.init_item("face_swapper_weight",      0.5)
 
     # Group 8 — Face tracker
