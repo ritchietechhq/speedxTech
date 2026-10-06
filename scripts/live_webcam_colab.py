@@ -149,10 +149,12 @@ def _init_state(state_manager, identity_id: str) -> None:
 def _prepare(identity_id: str, db_path: str):
     """Set up paths, state, consent gate, models.  Returns (source_frames, funcs)."""
     os.environ["SPEED_X_TECHNOLOGY_IDENTITY_ID"] = identity_id
-    os.environ["SPEED_X_TECHNOLOGY_CONSENT_DB_PATH"] = os.path.abspath(db_path)
     for p in (_FF_ROOT, _ROOT):
         if p not in sys.path:
             sys.path.insert(0, p)
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("facefusion"):
+            del sys.modules[mod_name]
 
     from facefusion import state_manager
     from facefusion.content_analyser import analyse_stream
