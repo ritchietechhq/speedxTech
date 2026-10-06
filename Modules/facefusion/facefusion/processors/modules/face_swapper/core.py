@@ -653,7 +653,7 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 		pixel_boost_vision_frame = normalize_crop_frame(pixel_boost_vision_frame)
 		temp_vision_frames.append(pixel_boost_vision_frame)
 	crop_vision_frame = explode_pixel_boost(temp_vision_frames, pixel_boost_total, model_size, pixel_boost_size)
-	crop_vision_frame = conditional_match_frame_color(crop_vision_frame_raw, crop_vision_frame)
+	crop_vision_frame = conditional_match_frame_color(crop_vision_frame_raw, crop_vision_frame.astype(numpy.uint8))
 
 	if 'area' in state_manager.get_item('face_mask_types'):
 		face_landmark_68 = cv2.transform(target_face.landmark_set.get('68').reshape(1, -1, 2), affine_matrix).reshape(-1, 2)
@@ -790,8 +790,7 @@ def normalize_crop_frame(crop_vision_frame : VisionFrame) -> VisionFrame:
 	if model_type in [ 'ghost', 'hififace', 'hyperswap', 'uniface' ]:
 		crop_vision_frame = crop_vision_frame * model_standard_deviation + model_mean
 
-	crop_vision_frame = crop_vision_frame.clip(0, 1)
-	crop_vision_frame = crop_vision_frame[:, :, ::-1] * 255
+	crop_vision_frame = (crop_vision_frame[:, :, ::-1] * 255).clip(0, 255).astype(numpy.uint8)
 	return crop_vision_frame
 
 
