@@ -1,3 +1,5 @@
+import os
+from time import perf_counter
 from argparse import ArgumentParser
 from functools import lru_cache
 from types import ModuleType
@@ -26,6 +28,8 @@ from facefusion.processors.types import ProcessorOutputs
 from facefusion.program_helper import find_argument_group
 from facefusion.thread_helper import conditional_thread_semaphore
 from facefusion.types import ApplyStateItem, Args, DownloadScope, Embedding, Face, InferencePool, InferenceProvider, ModelOptions, ModelSet, ProcessMode, VisionFrame
+from facefusion.quality_metrics import record_timings
+from facefusion.skin_match import match_skin, stream_color_state, skin_statistics
 from facefusion.vision import conditional_match_frame_color, read_static_image, read_static_images, read_static_video_frame, unpack_resolution
 
 
@@ -628,10 +632,19 @@ def post_process() -> None:
 			common_module.clear_inference_pool()
 
 
+@lru_cache(maxsize=8)
+def source_skin_statistics(data, width, height):
+	crop = numpy.frombuffer(data, dtype=numpy.uint8).reshape(height, width, 3)
+	return skin_statistics(crop, create_region_mask(crop, ['skin']))
+
+
 def swap_face(source_face : Face, target_face : Face, source_vision_frame : VisionFrame, temp_vision_frame : VisionFrame) -> VisionFrame:
+	started = perf_counter()
 	model_template = get_model_options().get('template')
 	model_size = get_model_options().get('size')
 	pixel_boost_size = unpack_resolution(state_manager.get_item('face_swapper_pixel_boost'))
+	if pixel_boost_size not in [unpack_resolution(size) for size in face_swapper_choices.face_swapper_set[state_manager.get_item('face_swapper_model')]]:
+		raise ValueError('Unsupported pixel boost resolution for selected face swapper')
 	pixel_boost_total = pixel_boost_size[0] // model_size[0]
 	crop_vision_frame, affine_matrix = warp_face_by_face_landmark_5(temp_vision_frame, target_face.landmark_set.get('5/68'), model_template, pixel_boost_size)
 	crop_vision_frame_raw = crop_vision_frame.copy()
@@ -646,6 +659,7 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 		occlusion_mask = create_occlusion_mask(crop_vision_frame)
 		crop_masks.append(occlusion_mask)
 
+	prepared = perf_counter()
 	pixel_boost_vision_frames = implode_pixel_boost(crop_vision_frame, pixel_boost_total, model_size)
 	for pixel_boost_vision_frame in pixel_boost_vision_frames:
 		pixel_boost_vision_frame = prepare_crop_frame(pixel_boost_vision_frame)
@@ -653,19 +667,48 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 		pixel_boost_vision_frame = normalize_crop_frame(pixel_boost_vision_frame)
 		temp_vision_frames.append(pixel_boost_vision_frame)
 	crop_vision_frame = explode_pixel_boost(temp_vision_frames, pixel_boost_total, model_size, pixel_boost_size)
-	crop_vision_frame = conditional_match_frame_color(crop_vision_frame_raw, crop_vision_frame.astype(numpy.uint8))
+	inferred = perf_counter()
+	skin_mode = os.environ.get('SPEED_X_SKIN_MATCH', 'legacy')
+	if skin_mode == 'masked_lab':
+		skin_mask = numpy.minimum(create_region_mask(crop_vision_frame_raw, ['skin']), create_region_mask(crop_vision_frame, ['skin']))
+		if 'occlusion' in state_manager.get_item('face_mask_types'):
+			skin_mask = numpy.minimum(skin_mask, occlusion_mask)
+		source_stats = None
+		if os.environ.get('SPEED_X_TONE_REFERENCE', 'target') == 'source':
+			source_crop, _ = warp_face_by_face_landmark_5(source_vision_frame, source_face.landmark_set.get('5/68'), model_template, model_size)
+			source_stats = source_skin_statistics(source_crop.tobytes(), source_crop.shape[1], source_crop.shape[0])
+		crop_vision_frame = match_skin(crop_vision_frame_raw, crop_vision_frame, skin_mask,
+			strength = float(os.environ.get('SPEED_X_SKIN_STRENGTH', '0.8')), embedding = target_face.embedding, source_stats = source_stats)
+	elif skin_mode == 'legacy':
+		crop_vision_frame = conditional_match_frame_color(crop_vision_frame_raw, crop_vision_frame.astype(numpy.uint8))
+	elif skin_mode != 'off':
+		raise ValueError('SPEED_X_SKIN_MATCH must be masked_lab, legacy, or off')
 
+	matched = perf_counter()
 	if 'area' in state_manager.get_item('face_mask_types'):
 		face_landmark_68 = cv2.transform(target_face.landmark_set.get('68').reshape(1, -1, 2), affine_matrix).reshape(-1, 2)
 		area_mask = create_area_mask(crop_vision_frame, face_landmark_68, state_manager.get_item('face_mask_areas'))
 		crop_masks.append(area_mask)
 
 	if 'region' in state_manager.get_item('face_mask_types'):
-		region_mask = create_region_mask(crop_vision_frame, state_manager.get_item('face_mask_regions'))
+		region_mask = create_region_mask(crop_vision_frame_raw, state_manager.get_item('face_mask_regions'))
+		radius = max(1, round(pixel_boost_size[0] / 256))
+		region_mask = cv2.erode(region_mask, numpy.ones((radius * 2 + 1, radius * 2 + 1), numpy.uint8))
+		region_mask = cv2.GaussianBlur(region_mask, (0, 0), radius)
 		crop_masks.append(region_mask)
 
 	crop_mask = numpy.minimum.reduce(crop_masks).clip(0, 1)
+	masked = perf_counter()
 	paste_vision_frame = paste_back(temp_vision_frame, crop_vision_frame, crop_mask, affine_matrix)
+	finished = perf_counter()
+	record_timings({
+		'prepare': (prepared - started) * 1000, 'inference': (inferred - prepared) * 1000,
+		'skin_match': (matched - inferred) * 1000, 'boundary_mask': (masked - matched) * 1000,
+		'composite': (finished - masked) * 1000, 'total': (finished - started) * 1000
+	}, {'model': state_manager.get_item('face_swapper_model'),
+		'pixel_boost': state_manager.get_item('face_swapper_pixel_boost'), 'skin_match': skin_mode,
+		'blend': os.environ.get('SPEED_X_BLEND', 'alpha'),
+		'strength': os.environ.get('SPEED_X_SKIN_STRENGTH', '0.8')})
 	return paste_vision_frame
 
 
@@ -819,6 +862,8 @@ def process_frame(inputs : FaceSwapperInputs) -> ProcessorOutputs:
 	source_face = extract_source_face(source_vision_frames)
 	target_faces = select_faces(reference_vision_frame, source_vision_frames, target_vision_frames)
 
+	if not target_faces and stream_color_state.get() is not None:
+		stream_color_state.get().reset()
 	if source_face and target_faces:
 		source_vision_frame = get_first(source_vision_frames)
 

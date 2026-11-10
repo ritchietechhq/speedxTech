@@ -144,6 +144,8 @@ def _init_state(state_manager, identity_id: str) -> None:
     }
     for key, value in items.items():
         state_manager.init_item(key, value)
+    from facefusion.quality_profile import apply_quality_profile
+    apply_quality_profile(state_manager)
 
 
 def _prepare(identity_id: str, db_path: str):
@@ -213,6 +215,8 @@ def run(
     window_start = started
     window_frames = 0
     live_fps = 0.0
+    from facefusion.skin_match import TemporalColor, stream_color_state
+    color_token = stream_color_state.set(TemporalColor())
     blocked = False
 
     try:
@@ -251,6 +255,7 @@ def run(
             ok, buf = cv2.imencode(".jpg", numpy.hstack([left, right]), [cv2.IMWRITE_JPEG_QUALITY, 80])
             result_b64 = base64.b64encode(buf.tobytes()).decode("ascii") if ok else ""
     finally:
+        stream_color_state.reset(color_token)
         try:
             eval_js("stopCam()")
         except Exception:

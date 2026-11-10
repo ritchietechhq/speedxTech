@@ -224,7 +224,7 @@ def main() -> int:
 
     # Group 7 — Face swapper processor
     state_manager.init_item("face_swapper_model",       "hyperswap_1a_256")
-    state_manager.init_item("face_swapper_pixel_boost", "128x128")
+    state_manager.init_item("face_swapper_pixel_boost", "256x256")
     state_manager.init_item("face_swapper_weight",      0.5)
 
     # Group 8 — Face tracker
@@ -250,6 +250,10 @@ def main() -> int:
     # frame_enhancer (STYLE/REST: super-resolution upscaling)
     state_manager.init_item("frame_enhancer_model",     "span_kendata_x4")
     state_manager.init_item("frame_enhancer_blend",     80)    # int 0-100
+
+    from facefusion.quality_profile import apply_quality_profile
+    quality_settings = apply_quality_profile(state_manager)
+    print(f"[SPEED_X_QUALITY] {quality_settings}", flush=True)
 
     # ── CUDA EP pre-check: log before any model load ──────────────────────────
     # This runs before the camera opens. Prints to stdout so the orchestrator's
@@ -349,7 +353,10 @@ def main() -> int:
             if stream_pipe.stdin and stream_pipe.poll() is None:
                 import cv2 as _cv2
                 _, encoded = _cv2.imencode(".jpg", frame)
-                stream_pipe.stdin.write(encoded.tobytes())
+                if not _:
+                    raise RuntimeError("Failed to encode output frame")
+                from facefusion.stream_io import write_frame
+                write_frame(stream_pipe, encoded.tobytes())
 
             frame_count += 1
 
@@ -429,10 +436,11 @@ def main() -> int:
         print(f"[Runner] {detail}", file=sys.stderr)
         return EXIT_STARTUP_FAILURE
     finally:
+        if "gen" in locals():
+            gen.close()
         camera.release()
-        if stream_pipe.stdin:
-            stream_pipe.stdin.close()
-        stream_pipe.wait()
+        from facefusion.stream_io import close_encoder
+        close_encoder(stream_pipe)
 
     # Clean stop
     elapsed = time.monotonic() - window_start

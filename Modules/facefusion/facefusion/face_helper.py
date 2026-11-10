@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from typing import List, Sequence, Tuple
 
@@ -5,6 +6,7 @@ import cv2
 import numpy
 from cv2.typing import Size
 
+from facefusion.quality_blend import blend_face
 from facefusion.types import Anchors, Angle, BoundingBox, Distance, FaceDetectorModel, FaceLandmark5, FaceLandmark68, Mask, Matrix, Points, Scale, Score, Translation, VisionFrame, WarpTemplate, WarpTemplateSet
 
 WARP_TEMPLATE_SET : WarpTemplateSet =\
@@ -108,7 +110,7 @@ def paste_back(temp_vision_frame : VisionFrame, crop_vision_frame : VisionFrame,
 	inverse_vision_frame = cv2.warpAffine(crop_vision_frame, paste_matrix, (paste_width, paste_height), borderMode = cv2.BORDER_REPLICATE)
 	temp_vision_frame = temp_vision_frame.copy()
 	paste_vision_frame = temp_vision_frame[y1:y2, x1:x2]
-	paste_vision_frame = paste_vision_frame * (1 - inverse_vision_mask) + inverse_vision_frame * inverse_vision_mask
+	paste_vision_frame = blend_face(paste_vision_frame, inverse_vision_frame, inverse_vision_mask, os.environ.get('SPEED_X_BLEND', 'alpha'))
 	temp_vision_frame[y1:y2, x1:x2] = paste_vision_frame.astype(temp_vision_frame.dtype)
 	return temp_vision_frame
 
