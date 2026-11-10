@@ -159,3 +159,62 @@ def test_encoder_write_deadline():
     finally:
         close_encoder(process)
     assert process.poll() is not None
+
+
+def test_one_euro_filter_smoothing_and_reset():
+    from facefusion.landmark_stabilizer import OneEuroFilter, TemporalMatrixStabilizer, stream_matrix_state, stabilize_affine_matrix
+    filt = OneEuroFilter(min_cutoff=1.0, beta=0.007)
+    m0 = np.eye(2, 3)
+    out0 = filt.filter(m0, timestamp=0.0)
+    np.testing.assert_allclose(out0, m0)
+
+    # Slight jitter should be heavily smoothed
+    m1 = m0 + np.full((2, 3), 0.5)
+    out1 = filt.filter(m1, timestamp=0.033)
+    assert np.all(out1 < m1)
+    assert np.all(out1 > m0)
+
+    # Large sudden jump (>50) should reset filter immediately
+    m_jump = m0 + 100.0
+    out_jump = filt.filter(m_jump, timestamp=0.066)
+    np.testing.assert_allclose(out_jump, m_jump)
+
+    # Test stabilize_affine_matrix no-op outside stream context
+    assert np.array_equal(stabilize_affine_matrix(m0), m0)
+
+    # Inside stream context
+    token = stream_matrix_state.set(TemporalMatrixStabilizer())
+    try:
+        assert stabilize_affine_matrix(m0) is not None
+    finally:
+        stream_matrix_state.reset(token)
+
+
+def test_texture_injection_and_shading_transfer():
+    from facefusion.texture_transfer import extract_high_frequency_texture, inject_skin_texture, transfer_directional_shading
+
+    target = np.full((64, 64, 3), 120, dtype=np.uint8)
+    target[::2, ::2] += 20  # add high frequency pattern
+    swapped = np.full((64, 64, 3), 120, dtype=np.uint8)
+    mask = np.ones((64, 64), dtype=np.float32)
+
+    texture = extract_high_frequency_texture(target, sigma=2.0)
+    assert texture.shape == target.shape
+
+    # Inject texture
+    textured = inject_skin_texture(swapped, texture, mask, strength=0.5)
+    assert textured.shape == swapped.shape
+    assert textured.dtype == np.uint8
+    # High frequency variation should now exist on swapped
+    assert np.any(textured != swapped)
+
+    # Directional shading test
+    target_shaded = target.copy()
+    target_shaded[:, :32] -= 40  # left side darker
+    target_shaded[:, 32:] += 40  # right side brighter
+
+    shading_matched = transfer_directional_shading(target_shaded, swapped, mask, strength=0.5)
+    assert shading_matched.shape == swapped.shape
+    assert shading_matched.dtype == np.uint8
+    assert np.mean(shading_matched[:, :32]) < np.mean(shading_matched[:, 32:])
+

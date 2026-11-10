@@ -30,6 +30,7 @@ from facefusion.thread_helper import conditional_thread_semaphore
 from facefusion.types import ApplyStateItem, Args, DownloadScope, Embedding, Face, InferencePool, InferenceProvider, ModelOptions, ModelSet, ProcessMode, VisionFrame
 from facefusion.quality_metrics import record_timings
 from facefusion.skin_match import match_skin, stream_color_state, skin_statistics
+from facefusion.texture_transfer import extract_high_frequency_texture, inject_skin_texture, transfer_directional_shading
 from facefusion.vision import conditional_match_frame_color, read_static_image, read_static_images, read_static_video_frame, unpack_resolution
 
 
@@ -679,6 +680,17 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 			source_stats = source_skin_statistics(source_crop.tobytes(), source_crop.shape[1], source_crop.shape[0])
 		crop_vision_frame = match_skin(crop_vision_frame_raw, crop_vision_frame, skin_mask,
 			strength = float(os.environ.get('SPEED_X_SKIN_STRENGTH', '0.8')), embedding = target_face.embedding, source_stats = source_stats)
+
+		# Elite: Directional lighting gradient & shadow transfer
+		shading_strength = float(os.environ.get('SPEED_X_SHADING_STRENGTH', '0.45'))
+		if shading_strength > 0:
+			crop_vision_frame = transfer_directional_shading(crop_vision_frame_raw, crop_vision_frame, skin_mask, strength = shading_strength)
+
+		# Elite: High-frequency skin pore & micro-texture injection
+		texture_strength = float(os.environ.get('SPEED_X_TEXTURE_STRENGTH', '0.35'))
+		if texture_strength > 0:
+			high_freq_texture = extract_high_frequency_texture(crop_vision_frame_raw, sigma = 2.0)
+			crop_vision_frame = inject_skin_texture(crop_vision_frame, high_freq_texture, skin_mask, strength = texture_strength)
 	elif skin_mode == 'legacy':
 		crop_vision_frame = conditional_match_frame_color(crop_vision_frame_raw, crop_vision_frame.astype(numpy.uint8))
 	elif skin_mode != 'off':

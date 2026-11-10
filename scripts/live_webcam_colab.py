@@ -216,7 +216,9 @@ def run(
     window_frames = 0
     live_fps = 0.0
     from facefusion.skin_match import TemporalColor, stream_color_state
+    from facefusion.landmark_stabilizer import TemporalMatrixStabilizer, stream_matrix_state
     color_token = stream_color_state.set(TemporalColor())
+    matrix_token = stream_matrix_state.set(TemporalMatrixStabilizer())
     blocked = False
 
     try:
@@ -256,6 +258,7 @@ def run(
             result_b64 = base64.b64encode(buf.tobytes()).decode("ascii") if ok else ""
     finally:
         stream_color_state.reset(color_token)
+        stream_matrix_state.reset(matrix_token)
         try:
             eval_js("stopCam()")
         except Exception:

@@ -220,6 +220,8 @@ def create_occlusion_mask(crop_vision_frame : VisionFrame) -> Mask:
 
 	occlusion_mask = numpy.minimum.reduce(temp_masks)
 	occlusion_mask = (cv2.GaussianBlur(occlusion_mask.clip(0, 1), (0, 0), 5).clip(0.5, 1) - 0.5) * 2
+	kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+	occlusion_mask = cv2.erode(occlusion_mask.clip(0, 1).astype(numpy.float32), kernel, iterations = 1)
 	return occlusion_mask
 
 

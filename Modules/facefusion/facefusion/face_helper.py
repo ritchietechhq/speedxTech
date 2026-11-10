@@ -7,6 +7,7 @@ import numpy
 from cv2.typing import Size
 
 from facefusion.quality_blend import blend_face
+from facefusion.landmark_stabilizer import stabilize_affine_matrix
 from facefusion.types import Anchors, Angle, BoundingBox, Distance, FaceDetectorModel, FaceLandmark5, FaceLandmark68, Mask, Matrix, Points, Scale, Score, Translation, VisionFrame, WarpTemplate, WarpTemplateSet
 
 WARP_TEMPLATE_SET : WarpTemplateSet =\
@@ -78,6 +79,7 @@ def estimate_matrix_by_face_landmark_5(face_landmark_5 : FaceLandmark5, warp_tem
 
 def warp_face_by_face_landmark_5(temp_vision_frame : VisionFrame, face_landmark_5 : FaceLandmark5, warp_template : WarpTemplate, crop_size : Size) -> Tuple[VisionFrame, Matrix]:
 	affine_matrix = estimate_matrix_by_face_landmark_5(face_landmark_5, warp_template, crop_size)
+	affine_matrix = stabilize_affine_matrix(affine_matrix)
 	crop_vision_frame = cv2.warpAffine(temp_vision_frame, affine_matrix, crop_size, borderMode = cv2.BORDER_REPLICATE, flags = cv2.INTER_AREA)
 	return crop_vision_frame, affine_matrix
 

@@ -8,6 +8,7 @@ import cv2
 from facefusion import ffmpeg_builder, logger, state_manager, translator
 from facefusion.live_capture import latest_frames
 from facefusion.skin_match import TemporalColor, stream_color_state
+from facefusion.landmark_stabilizer import TemporalMatrixStabilizer, stream_matrix_state
 from facefusion.audio import create_empty_audio_frame
 from facefusion.content_analyser import analyse_stream
 from facefusion.ffmpeg import open_ffmpeg
@@ -70,7 +71,8 @@ def multi_process_capture(camera_capture : cv2.VideoCapture, camera_fps : Fps) -
 	source_vision_frames = read_static_images(source_paths)
 
 	frames = latest_frames(camera_capture)
-	token = stream_color_state.set(TemporalColor())
+	color_token = stream_color_state.set(TemporalColor())
+	matrix_token = stream_matrix_state.set(TemporalMatrixStabilizer())
 	try:
 		for frame in frames:
 			if not is_vision_frame(frame):
@@ -81,7 +83,8 @@ def multi_process_capture(camera_capture : cv2.VideoCapture, camera_fps : Fps) -
 			yield process_stream_frame(source_vision_frames, frame)
 	finally:
 		frames.close()
-		stream_color_state.reset(token)
+		stream_color_state.reset(color_token)
+		stream_matrix_state.reset(matrix_token)
 
 
 def process_stream_frame(source_vision_frames : List[VisionFrame], target_vision_frame : VisionFrame) -> VisionFrame:
